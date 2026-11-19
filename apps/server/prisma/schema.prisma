@@ -1,0 +1,882 @@
+// 课程约定（见 CLAUDE.md）：
+// - 主键 Int @id @default(autoincrement())；编码字段 code String @unique
+// - 每个模型带 createdAt / updatedAt / createdBy / updatedBy
+// - 涉及状态或数量并发修改的模型带 version Int @default(0)
+// - 数量用 Int（最小单位）或 Decimal，不用 Float；时间 UTC
+//
+// 第 2 节起由学生逐步添加模型：User、RefreshToken → Role、Permission、Menu … → Material、Bom …
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// 用户：登录账号。密码只存 bcrypt 哈希。
+model User {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String
+  name      String
+  status    Int      @default(1) // 1=启用 0=停用
+  /// 连续密码错误次数：登录成功清零，达到阈值触发锁定
+  failedAttempts Int  @default(0)
+  /// 锁定截止时间：非空且未过期时拒绝登录（含正确密码）
+  lockedUntil DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+  tokens    RefreshToken[]
+  employee  Employee?
+  userRoles UserRole[]
+  andonCallsMade      AndonCall[]    @relation("AndonCaller")
+  andonCallsResponded AndonCall[]    @relation("AndonResponder")
+  notifications       Notification[]
+}
+
+/// 刷新令牌：长命 token，只用于换新 access；登出/轮换时置 revoked
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+
+  @@index([userId])
+}
+
+/// 角色：权限码的集合。内置角色（isBuiltin）由种子创建，禁止改权限/删除
+model Role {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  remark    String?
+  isBuiltin Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+  userRoles      UserRole[]
+  rolePermissions RolePermission[]
+}
+
+/// 权限：`模块:动作` 权限码字典。新码必须先进种子表（有扫描测试兜底）
+model Permission {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  module    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+  rolePermissions RolePermission[]
+}
+
+/// 菜单树：叶子节点绑定权限码（前端可见性 + 动态路由）；目录节点 permissionCode 为空
+model Menu {
+  id        Int      @id @default(autoincrement())
+  parentId  Int?
+  parent    Menu?    @relation("MenuTree", fields: [parentId], references: [id])
+  children  Menu[]   @relation("MenuTree")
+  path      String   @unique
+  name      String
+  icon      String?
+  /// 前端组件路径（相对 src/views），如 user/UserList；目录节点为空
+  component String?
+  permissionCode String?
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+}
+
+/// 用户-角色 多对多
+model UserRole {
+  userId    Int
+  roleId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+/// 角色-权限 多对多
+model RolePermission {
+  roleId       Int
+  permissionId Int
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+/// 系统设置（骨架自带的唯一模型，Prisma 要求至少一个模型）。
+/// 键值对：例如 overproduction_rate、andon_timeout_minutes 也可以放字典（第 10 节）。
+model SystemSetting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String
+  remark    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// 数据字典：一组键值对的分类（如 work_order_status），code 被业务代码引用，创建后不可改。
+model Dict {
+  id        Int        @id @default(autoincrement())
+  code      String     @unique
+  name      String
+  remark    String?
+  items     DictItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  createdBy String     @default("system")
+  updatedBy String     @default("system")
+}
+
+/// 字典项：value 在同一字典内唯一；停用后下拉不显示，历史数据仍按 label 显示。
+model DictItem {
+  id        Int      @id @default(autoincrement())
+  dictId    Int
+  dict      Dict     @relation(fields: [dictId], references: [id], onDelete: Cascade)
+  label     String
+  value     String
+  sort      Int      @default(0)
+  status    Int      @default(1) // 1=启用 0=停用
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+
+  @@unique([dictId, value])
+  @@index([dictId])
+}
+
+/// 单位：计量单位字典（个/片/卷/kg）。code 唯一；被物料引用，有引用时禁删
+model Unit {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  status    Int      @default(1) // 1=启用 0=停用（停用后下拉不显示，历史物料仍引用）
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+  materials Material[]
+}
+
+/// 物料分类：parentId 树（如 原料→电子料→电容）。code 全局唯一；有子分类或物料时禁删
+model MaterialCategory {
+  id        Int      @id @default(autoincrement())
+  parentId  Int?
+  parent    MaterialCategory?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children  MaterialCategory[] @relation("CategoryTree")
+  code      String   @unique
+  name      String
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+  materials Material[]
+}
+
+/// 物料主数据：编码一旦使用不可改（被 BOM/工单/库存引用）。删除被引用物料 → 拒绝（第 16 节 BOM 完成后补引用检查）
+model Material {
+  id           Int      @id @default(autoincrement())
+  code         String   @unique
+  name         String
+  spec         String?  // 规格型号，如 0402 100nF ±10%
+  categoryId   Int
+  category     MaterialCategory @relation(fields: [categoryId], references: [id])
+  unitId       Int
+  unit         Unit     @relation(fields: [unitId], references: [id])
+  type         String   // RAW=原料 / SEMI=半成品 / FINISHED=成品
+  status       Int      @default(1) // 1=启用 0=停用
+  safetyStock  Int?     // 安全库存（最小单位），可选
+  requireFqc   Boolean  @default(false) // 完工入库前是否要求 FQC 合格（第 45 节用例 3）
+  isDeleted    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdBy    String   @default("system")
+  updatedBy    String   @default("system")
+  parentBoms   Bom[]  @relation("BomParent")     // 作为 BOM 父物料
+  routings     Routing[] @relation("RoutingParent") // 作为路线父物料
+  childItems   BomItem[] @relation("BomChild")   // 作为 BOM 子件
+  productionOrders ProductionOrder[] @relation("ProductionOrderMaterial") // 作为订单成品
+  workOrders   WorkOrder[] @relation("WorkOrderMaterial") // 作为工单物料
+  lots         Lot[] @relation("LotMaterial")
+  balances     InventoryBalance[] @relation("BalanceMaterial")
+  txs          InventoryTransaction[] @relation("TxMaterial")
+  issueItems   MaterialIssueItem[] @relation("IssueItemMaterial")
+
+  @@index([categoryId])
+  @@index([unitId])
+  @@index([name])
+}
+
+/// 审计日志：谁在什么时候对什么做了什么。由 AuditInterceptor 自动记录非 GET 请求，只读（无增删改接口）。
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int?
+  username   String   @default("") // 登录失败等无用户场景留空；记录时快照用户名，用户改名后历史仍可读
+  method     String
+  path       String
+  module     String   @default("") // 从路径第一段取（auth/dicts/...）
+  action     String   @default("") // 方法 + 末段路径（POST /dicts → create；POST /auth/login → login）
+  params     String   @default("{}") // JSON 摘要：query/body，密码与 token 字段脱敏
+  result     String   @default("") // success | <错误码>（如 1002）
+  durationMs Int      @default(0)
+  ip         String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([module])
+  @@index([createdAt])
+}
+
+/// BOM：某物料的某一版清单。同一父物料 @@unique([materialId, version])；同一时刻只有一个 ACTIVE。
+model Bom {
+  id            Int       @id @default(autoincrement())
+  materialId    Int
+  material      Material  @relation("BomParent", fields: [materialId], references: [id])
+  version       String    // 如 v1 / v2
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  status        String    @default("DRAFT") // DRAFT / ACTIVE / OBSOLETE
+  remark        String?
+  items         BomItem[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  createdBy     String    @default("system")
+  updatedBy     String    @default("system")
+
+  @@unique([materialId, version])
+  @@index([materialId, status])
+  @@index([status])
+}
+
+/// BOM 明细：子件用量 Int（最小单位）；scrapRate 损耗率万分比（300 = 3%），口径：需求 = 用量 × (1 + scrapRate/10000)。
+model BomItem {
+  id              Int      @id @default(autoincrement())
+  bomId           Int
+  bom             Bom      @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  childMaterialId Int
+  childMaterial   Material @relation("BomChild", fields: [childMaterialId], references: [id])
+  qty             Int      // 用量（最小单位数，见 CLAUDE.md：SQLite 无 Decimal，数量用 Int）
+  scrapRate       Int      @default(0) // 损耗率（万分比 bp）：300 = 3%
+  position        String?  // 位号，如 R1,R2
+  remark          String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String   @default("system")
+  updatedBy       String   @default("system")
+
+  @@index([bomId])
+  @@index([childMaterialId])
+}
+
+/// 工作中心：车间/产线。有设备或被工序引用时不可删。
+model WorkCenter {
+  id            Int        @id @default(autoincrement())
+  code          String     @unique
+  name          String
+  type          String     @default("LINE") // LINE=产线 CELL=工位
+  dailyCapacity Int        @default(0) // 日产能（分钟 or 件，业务约定）
+  status        Int        @default(1) // 1=启用 0=停用
+  equipments    Equipment[]
+  operations    RoutingOperation[]
+  teams         Team[]
+  workOrders    WorkOrder[] @relation("WorkOrderCenter")
+  operationTasks WorkOrderOperation[] @relation("OperationTaskCenter")
+  andonCalls     AndonCall[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  createdBy     String     @default("system")
+  updatedBy     String     @default("system")
+}
+
+/// 设备：归属工作中心；状态第 46 节扩展（当前四态）
+model Equipment {
+  id           Int        @id @default(autoincrement())
+  code         String     @unique
+  name         String
+  workCenterId Int
+  workCenter   WorkCenter @relation(fields: [workCenterId], references: [id])
+  model        String?
+  operationTasks WorkOrderOperation[] @relation("OperationTaskEquipment")
+  statusLogs     EquipmentStatusLog[]
+  downtimes      Downtime[]
+  dailyReports   EquipmentDailyReport[]
+  andonCalls     AndonCall[]
+  status       String     @default("IDLE") // RUNNING / IDLE / FAULT / MAINTENANCE
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  createdBy    String     @default("system")
+  updatedBy    String     @default("system")
+
+  @@index([workCenterId])
+}
+
+/// 工艺路线：某物料的某一版工序序列（版本化同 BOM，激活让位策略）
+model Routing {
+  id            Int                @id @default(autoincrement())
+  materialId    Int
+  material      Material           @relation("RoutingParent", fields: [materialId], references: [id])
+  version       String
+  status        String             @default("DRAFT") // DRAFT / ACTIVE / OBSOLETE
+  effectiveFrom DateTime           @default(now())
+  remark        String?
+  operations    RoutingOperation[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  createdBy     String             @default("system")
+  updatedBy     String             @default("system")
+
+  @@unique([materialId, version])
+  @@index([materialId, status])
+}
+
+/// 工序：路线内按 seq 排序，绑定工作中心；@@unique([routingId, seq]) 防重号
+model RoutingOperation {
+  id                Int        @id @default(autoincrement())
+  routingId         Int
+  routing           Routing    @relation(fields: [routingId], references: [id], onDelete: Cascade)
+  seq               Int
+  code              String
+  name              String
+  workCenterId      Int
+  workCenter        WorkCenter @relation(fields: [workCenterId], references: [id])
+  standardMinutes   Int        // 标准工时（分钟，>0）
+  isInspectionPoint Boolean    @default(false) // 质检点
+  allowSkip         Boolean    @default(false)
+  remark            String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  createdBy         String     @default("system")
+  updatedBy         String     @default("system")
+
+  @@unique([routingId, seq])
+  @@index([routingId])
+  @@index([workCenterId])
+}
+
+/// 班次：startTime/endTime 是工厂本地时间 "HH:mm"；crossDay = 结束时间数值小于开始时间（如 00:00-08:00）
+model Shift {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  startTime String   // "08:00"
+  endTime   String   // "16:00"
+  crossDay  Boolean  @default(false) // 跨天班次（如 00:00-08:00 的晚班）
+  workReports WorkReport[] @relation("WorkReportShift")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+}
+
+/// 班组：绑定工作中心；有员工时不可删
+model Team {
+  id           Int        @id @default(autoincrement())
+  code         String     @unique
+  name         String
+  workCenterId Int
+  workCenter   WorkCenter @relation(fields: [workCenterId], references: [id])
+  leaderId     Int?       @unique // 组长（员工）；必须属于本班组
+  leader       Employee?  @relation("TeamLeader", fields: [leaderId], references: [id])
+  employees    Employee[] @relation("TeamMembers")
+  transfersIn  EmployeeTransfer[] @relation("ToTeam")
+  transfersOut EmployeeTransfer[] @relation("FromTeam")
+  operationTasks WorkOrderOperation[] @relation("OperationTaskTeam")
+  workReports  WorkReport[] @relation("WorkReportTeam")
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  createdBy    String     @default("system")
+  updatedBy    String     @default("system")
+}
+
+/// 员工：工号唯一；不等于系统用户（userId 可选关联，且一个用户只能关联一个员工）
+model Employee {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique // 工号
+  name      String
+  teamId    Int
+  team      Team     @relation("TeamMembers", fields: [teamId], references: [id])
+  userId    Int?     @unique
+  user      User?    @relation(fields: [userId], references: [id])
+  status    String   @default("ACTIVE") // ACTIVE / LEFT
+  hiredAt   DateTime @default(now())
+  leftAt    DateTime?
+  skills    EmployeeSkill[]
+  ledTeams  Team[]   @relation("TeamLeader")
+  operationTasks WorkOrderOperation[] @relation("OperationTaskEmployee")
+  workReports WorkReport[] @relation("WorkReportEmployee")
+  transfers EmployeeTransfer[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+
+  @@index([teamId])
+  @@index([status])
+}
+
+/// 员工技能：按工序编码或工作中心 + 等级 1-5
+model EmployeeSkill {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  opCode     String?  // 工序编码（与 RoutingOperation.code 对应），二选一
+  workCenterId Int?   // 或工作中心
+  level      Int      @default(1) // 1-5
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([employeeId])
+}
+
+/// 员工调组记录：历史不变原则的证据表（报工存快照，这里是人员侧轨迹）
+model EmployeeTransfer {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  fromTeamId Int
+  fromTeam   Team     @relation("FromTeam", fields: [fromTeamId], references: [id])
+  toTeamId   Int
+  toTeam     Team     @relation("ToTeam", fields: [toTeamId], references: [id])
+  at         DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([employeeId])
+}
+
+/// 生产订单：计划层的"交 1000 台 X"。拆分后工单数量之和恒等于 qty（第 26 节）
+model ProductionOrder {
+  id         Int         @id @default(autoincrement())
+  code       String      @unique
+  materialId Int
+  material   Material    @relation("ProductionOrderMaterial", fields: [materialId], references: [id])
+  qty        Int         // 计划数量（最小单位）；已有工单时禁改（第 27 节用例 4）
+  dueDate    DateTime    // 交期
+  priority   Int         @default(3) // 1（最高）- 5（最低）
+  source     String      @default("MANUAL") // MANUAL=手工 / SALES=销售 / PLAN=计划
+  status     String      @default("DRAFT") // DRAFT / PLANNED / RELEASED / COMPLETED / CANCELLED
+  version    Int         @default(0) // 乐观锁
+  remark     String?
+  workOrders WorkOrder[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  createdBy  String      @default("system")
+  updatedBy  String      @default("system")
+
+  @@index([status])
+  @@index([dueDate])
+}
+
+/// 工单：订单的拆分单元，产线一天/多天的生产任务。排产写 plannedStart/plannedEnd（第 26 节）
+model WorkOrder {
+  id                Int             @id @default(autoincrement())
+  code              String          @unique
+  productionOrderId Int
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id])
+  materialId        Int
+  material          Material        @relation("WorkOrderMaterial", fields: [materialId], references: [id])
+  qty               Int             // 拆分数量；之和 = 订单 qty
+  workCenterId      Int?
+  workCenter        WorkCenter?     @relation("WorkOrderCenter", fields: [workCenterId], references: [id])
+  routingId         Int?
+  plannedStart      DateTime?
+  plannedEnd        DateTime?
+  status            String          @default("CREATED") // 先只用 CREATED；RELEASED/IN_PROGRESS/… 状态机第 30 节
+  isDelayed         Boolean         @default(false) // plannedEnd > 订单 dueDate 时为 true（排产时计算）
+  completedQty      Int             @default(0) // 良品累计（末道工序完工时回写，第 34 节）
+  version           Int             @default(0) // 乐观锁
+  statusLogs        WorkOrderStatusLog[]
+  operations        WorkOrderOperation[]
+  materialIssues    MaterialIssue[]      @relation("MaterialIssueOrder")
+  lotsProduced      Lot[]                @relation("LotFromWorkOrder")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  createdBy         String          @default("system")
+  updatedBy         String          @default("system")
+
+  @@index([productionOrderId])
+  @@index([status])
+  @@index([workCenterId, plannedStart])
+}
+
+/// 工单状态变更日志：transition() 在事务内写入，谁在何时把状态从什么改成什么（第 30 节）
+model WorkOrderStatusLog {
+  id           Int      @id @default(autoincrement())
+  workOrderId  Int
+  workOrder    WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  fromStatus   String   // 首次转换前为 CREATED；记转换前状态
+  toStatus     String
+  action       String   // release / start / pause / resume / complete / close / cancel
+  operatorId   Int?
+  operatorName String   // 快照用户名（用户改名后历史仍可读）
+  reason       String?
+  createdAt    DateTime @default(now())
+
+  @@index([workOrderId])
+}
+
+/// 工序任务：下达时对 ACTIVE 路线的**快照**（第 34 节），路线后续变更不影响已生成任务
+model WorkOrderOperation {
+  id                 Int             @id @default(autoincrement())
+  workOrderId        Int
+  workOrder          WorkOrder       @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  seq                Int             // 工序顺序（快照自 RoutingOperation.seq）
+  operationCode      String          // 工序编码快照
+  operationName      String          // 工序名称快照
+  workCenterId       Int
+  workCenter         WorkCenter      @relation("OperationTaskCenter", fields: [workCenterId], references: [id])
+  standardMinutes    Int             // 标准工时快照
+  isInspectionPoint  Boolean         @default(false)
+  plannedQty         Int             // 计划数量；首道 = 工单 qty，后续随上道完工动态补（第 35 节用例 5）
+  completedQty       Int             @default(0) // 良品累计
+  defectQty          Int             @default(0) // 不良累计
+  status             String          @default("PENDING") // PENDING / READY / IN_PROGRESS / COMPLETED / CANCELLED(35节)
+  teamId             Int?            // 派工快照：班组
+  team               Team?           @relation("OperationTaskTeam", fields: [teamId], references: [id])
+  employeeId         Int?            // 派工快照：员工
+  employee           Employee?       @relation("OperationTaskEmployee", fields: [employeeId], references: [id])
+  equipmentId        Int?            // 派工快照：设备
+  equipment          Equipment?      @relation("OperationTaskEquipment", fields: [equipmentId], references: [id])
+  skipped            Boolean         @default(false) // allowSkip 工序被标记跳过（第 35 节用例 4）
+  startedAt          DateTime?
+  completedAt        DateTime?
+  version            Int             @default(0) // 乐观锁（并发开工/完工）
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  createdBy          String          @default("system")
+  updatedBy          String          @default("system")
+  reports            WorkReport[]
+
+  @@unique([workOrderId, seq])
+  @@index([workOrderId, status])
+}
+
+/// 报工流水（第 37 节）：每次报工一条，任务的 completedQty 是流水之和；撤销 = 负数流水
+model WorkReport {
+  id                   Int                 @id @default(autoincrement())
+  workOrderOperationId Int
+  operation            WorkOrderOperation  @relation(fields: [workOrderOperationId], references: [id])
+  workOrderId          Int                 // 冗余工单 id，按工单聚合免 join
+  employeeId           Int
+  employee             Employee            @relation("WorkReportEmployee", fields: [employeeId], references: [id])
+  teamId               Int?                // 快照：报工时的班组
+  team                 Team?               @relation("WorkReportTeam", fields: [teamId], references: [id])
+  shiftId              Int?                // 快照：报工时刻的班次（getCurrentShift 推算，可手动覆盖）
+  shift                Shift?              @relation("WorkReportShift", fields: [shiftId], references: [id])
+  equipmentId          Int?
+  goodQty              Int
+  defectQty            Int
+  workMinutes          Int                 @default(0)
+  reportedAt           DateTime            @default(now())
+  /// 幂等键：客户端生成（表单打开时），重复提交返回同一条；unique 由数据库兜底（第 38 节）
+  idempotencyKey       String              @unique
+  reversedById         Int?                @unique // 撤销流水指向的原流水（一次撤销）；反向索引原流水被谁冲销
+  remark               String?
+  createdAt            DateTime            @default(now())
+  createdBy            String              @default("system")
+
+  @@index([workOrderId])
+  @@index([workOrderOperationId])
+  @@index([employeeId, reportedAt])
+  @@index([reportedAt, workOrderId]) // 报表：按日期区间扫流水（第 54 节）
+  @@index([equipmentId, reportedAt]) // OEE：按设备+日期取报工（第 54 节）
+}
+
+// ---- 库存与批次（第 41 节）：余额是流水的结果，流水只增不改 ----
+
+/// 仓库：种子给原料仓、成品仓
+model Warehouse {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String   @default("system")
+  updatedBy String   @default("system")
+  balances  InventoryBalance[]
+  transactions InventoryTransaction[]
+}
+
+/// 批次：追溯的载体。sourceType: PURCHASE 采购 / PRODUCTION 完工产出
+model Lot {
+  id               Int       @id @default(autoincrement())
+  lotNo            String    @unique
+  materialId       Int
+  material         Material  @relation("LotMaterial", fields: [materialId], references: [id])
+  qty              Int       // 初始数量
+  sourceType       String    @default("PURCHASE")
+  sourceWorkOrderId Int?
+  sourceWorkOrder   WorkOrder?  @relation("LotFromWorkOrder", fields: [sourceWorkOrderId], references: [id])
+  producedAt       DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  balances         InventoryBalance[]
+  transactions     InventoryTransaction[]
+}
+
+/// 库存余额：（仓库, 物料, 批次）三维唯一；只被流水驱动
+model InventoryBalance {
+  id          Int      @id @default(autoincrement())
+  warehouseId Int
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  materialId  Int
+  material    Material @relation("BalanceMaterial", fields: [materialId], references: [id])
+  lotId       Int
+  lot         Lot      @relation(fields: [lotId], references: [id])
+  qty         Int      @default(0)
+  version     Int      @default(0) // 乐观锁（并发领料）
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([warehouseId, materialId, lotId])
+  @@index([materialId])
+}
+
+/// 库存流水：只有 create，没有 update/delete；qty 正负（领料负、入库退料正）
+model InventoryTransaction {
+  id          Int       @id @default(autoincrement())
+  type        String    // ISSUE / RETURN / RECEIPT / ADJUST / INIT
+  warehouseId Int
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  materialId  Int
+  material    Material  @relation("TxMaterial", fields: [materialId], references: [id])
+  lotId       Int
+  lot         Lot       @relation(fields: [lotId], references: [id])
+  qty         Int       // 正负
+  refType     String    @default("") // MATERIAL_ISSUE / RECEIPT / ADJUST / INIT
+  refId       Int?
+  workOrderId Int?
+  operatorName String   @default("")
+  remark      String?
+  createdAt   DateTime  @default(now())
+
+  @@index([materialId, lotId])
+  @@index([workOrderId])
+  @@index([type, createdAt])
+}
+
+/// 领料单：工单领料的需求与执行
+model MaterialIssue {
+  id         Int                @id @default(autoincrement())
+  code       String             @unique
+  workOrderId Int
+  workOrder  WorkOrder          @relation("MaterialIssueOrder", fields: [workOrderId], references: [id])
+  status     String             @default("DRAFT") // DRAFT / ISSUED
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  createdBy  String             @default("system")
+  items      MaterialIssueItem[]
+  version    Int                @default(0)
+
+  @@index([workOrderId])
+}
+
+/// 领料单明细：requiredQty 按 BOM 展开 × 工单数量
+model MaterialIssueItem {
+  id           Int           @id @default(autoincrement())
+  issueId      Int
+  issue        MaterialIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  materialId   Int
+  material     Material      @relation("IssueItemMaterial", fields: [materialId], references: [id])
+  requiredQty  Int
+  issuedQty    Int           @default(0)
+  lotId        Int?          // 实际领用的批次
+  createdAt    DateTime      @default(now())
+
+  @@index([issueId])
+}
+
+// ---- 质检（第 44-45 节）：通用检验单 + 缺陷代码 + 与报工/入库联动 ----
+
+/// 缺陷代码字典：分类 + 严重度；停用后不出现在录入下拉，历史记录仍显示
+model DefectCode {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  category  String   // 外观 / 功能 / 尺寸 / 装配 / 其他
+  severity  String   @default("MINOR") // CRITICAL / MAJOR / MINOR
+  status    Int      @default(1) // 1=启用 0=停用
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  defects   InspectionDefect[]
+}
+
+/// 检验单：type 区分来料/过程/成品，refType+refId 关联对象；result PENDING→PASS/FAIL/CONCESSION
+model Inspection {
+  id                Int       @id @default(autoincrement())
+  code              String    @unique
+  type              String    // IQC / IPQC / FQC
+  refType           String    // LOT / OPERATION / WORK_ORDER
+  refId             Int
+  sampleQty         Int       @default(0)
+  passQty           Int       @default(0)
+  failQty           Int       @default(0)
+  result            String    @default("PENDING") // PENDING / PASS / FAIL / CONCESSION
+  inspectorId       Int?
+  inspectedAt       DateTime?
+  disposition       String?   // REWORK / SCRAP / CONCESSION（FAIL 后处理）
+  dispositionReason String?
+  remark            String?
+  version           Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  createdBy         String    @default("system")
+  defects           InspectionDefect[]
+
+  @@index([refType, refId])
+  @@index([type, result])
+}
+
+/// 检验缺陷明细：一张检验单多行缺陷
+model InspectionDefect {
+  id           Int        @id @default(autoincrement())
+  inspectionId Int
+  inspection   Inspection @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  defectCodeId Int
+  defectCode   DefectCode @relation(fields: [defectCodeId], references: [id])
+  qty          Int
+  remark       String?
+  createdAt    DateTime   @default(now())
+
+  @@index([inspectionId])
+}
+
+// ---- 设备状态与停机（第 46-47 节）：状态切换留痕，停机自动开关，日报按天切分且幂等 ----
+
+/// 设备状态变更日志：切换留痕（ RUNNING / IDLE / FAULT / MAINTENANCE ）
+model EquipmentStatusLog {
+  id          Int      @id @default(autoincrement())
+  equipmentId Int
+  equipment   Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  fromStatus  String
+  toStatus    String
+  operatorId  Int?
+  operatorName String  @default("")
+  reason      String?
+  changedAt   DateTime @default(now())
+
+  @@index([equipmentId, changedAt])
+}
+
+/// 停机记录：FAULT/MAINTENANCE 自动开，切回 RUNNING/IDLE 自动关；durationMinutes 结束时计算
+model Downtime {
+  id              Int      @id @default(autoincrement())
+  equipmentId     Int
+  equipment       Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  reasonCode      String   // 字典 downtime_reason（如 故障/换型/保养/待料）
+  startedAt       DateTime
+  endedAt         DateTime?
+  durationMinutes Int?     // 结束时计算（跨天按自然分摊到日报，此处存总时长）
+  remark          String?
+  workOrderId     Int?
+  createdAt       DateTime @default(now())
+
+  @@index([equipmentId, startedAt])
+}
+
+/// 设备日报：每天 00:05 生成前一天的可用率数据；@@unique 幂等（重复生成 upsert）
+model EquipmentDailyReport {
+  id              Int      @id @default(autoincrement())
+  equipmentId     Int
+  equipment       Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  date            String   // yyyy-MM-dd（工厂时区）
+  runningMinutes  Int      @default(0)
+  downMinutes     Int      @default(0)
+  downtimeCount   Int      @default(0)
+  open            Boolean  @default(false) // 用例2：停机未结束，算到当天 24:00 并标记
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([equipmentId, date])
+}
+
+// ---- 安灯与站内信（第 50-52 节）：小状态机 + 实时推送 + 通知 ----
+
+/// 安灯呼叫：OPEN → RESPONDED → CLOSED；同工作中心同类型 OPEN 呼叫合并（第 51 节）
+model AndonCall {
+  id                   Int       @id @default(autoincrement())
+  code                 String    @unique
+  type                 String    // MATERIAL / EQUIPMENT / QUALITY / OTHER（字典 andon_type）
+  workCenterId         Int
+  workCenter           WorkCenter @relation(fields: [workCenterId], references: [id])
+  equipmentId          Int?
+  equipment            Equipment? @relation(fields: [equipmentId], references: [id])
+  workOrderId          Int?
+  workOrderOperationId Int?
+  description          String
+  status               String    @default("OPEN") // OPEN / RESPONDED / CLOSED / CANCELLED
+  callerId             Int
+  caller               User      @relation("AndonCaller", fields: [callerId], references: [id])
+  responderId          Int?
+  responder            User?     @relation("AndonResponder", fields: [responderId], references: [id])
+  calledAt             DateTime  @default(now())
+  respondedAt          DateTime?
+  closedAt             DateTime?
+  resolution           String?
+  escalated            Boolean   @default(false) // 超时升级标记（只升级一次，第 51 节）
+  escalatedAt          DateTime?
+  cancelReason         String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  createdBy            String    @default("system")
+  updatedBy            String    @default("system")
+
+  @@index([workCenterId, status, type])
+  @@index([status, calledAt])
+}
+
+/// 站内信：创建呼叫给责任角色所有用户各一条；升级时通知 admin（第 51 节）
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  content   String
+  type      String   // ANDON / SYSTEM
+  refType   String?  // AndonCall
+  refId     Int?
+  isRead    Boolean  @default(false)
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead, createdAt])
+}
+
+// ---- 标签与 SOP 附件（第 55 节） ----
+
+/// 附件：SOP 作业指导书等。path 服务端 uuid 生成（防路径穿越/同名冲突）；fileName 仅作下载展示名。
+model Attachment {
+  id         Int      @id @default(autoincrement())
+  fileName   String   // 原始文件名（仅用于下载命名，不落盘）
+  path       String   @unique // 服务端生成的相对路径 uploads/<uuid>.<ext>
+  mimeType   String
+  size       Int
+  refType    String   // ROUTING_OPERATION / …
+  refId      Int
+  uploadedBy String
+  createdAt  DateTime @default(now())
+
+  @@index([refType, refId])
+}

@@ -1,0 +1,43 @@
+{
+  "name": "mes-starter",
+  "private": true,
+  "version": "0.1.0",
+  "description": "企业级Web项目开发（AI驱动MES版）课程骨架：NestJS + Prisma + SQLite + Vue 3 + Element Plus",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "start": "node scripts/start.mjs",
+    "stop": "node scripts/stop.mjs",
+    "dev:server": "npm run dev -w @mes/server",
+    "dev:web": "npm run dev -w @mes/web",
+    "dev:h5": "npm run dev -w @mes/h5",
+    "build": "npm run build -w @mes/shared && npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e -w @mes/server",
+    "prisma": "npm run prisma -w @mes/server",
+    "seed": "npm run seed -w @mes/server",
+    "postinstall": "npm run build -w @mes/shared",
+    "verify:m1": "node scripts/verify/run.mjs m1",
+    "verify:m2": "node scripts/verify/run.mjs m2",
+    "verify:m3": "node scripts/verify/run.mjs m3",
+    "verify:m4": "node scripts/verify/run.mjs m4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "allowScripts": {
+    "@nestjs/core@10.4.22": true,
+    "@prisma/client@5.22.0": true,
+    "@prisma/engines@5.22.0": true,
+    "@scarf/scarf@1.4.0": true,
+    "bcrypt@6.0.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.21.5": true,
+    "prisma@5.22.0": true,
+    "vue-demi@0.14.10": true
+  }
+}

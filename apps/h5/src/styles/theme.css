@@ -1,0 +1,337 @@
+:root {
+  /* 品牌色：与 Web 端保持一致（深海军蓝 + 琥珀色强调） */
+  --brand-navy: #14213d;
+  --brand-blue: #1f4e8c;
+  --brand-accent: #fca311;
+  --bg-page: #f4f6fb;
+  --text-main: #1c2434;
+  --text-sub: #7c8698;
+  --line: #e9edf3;
+
+  /* Vant 主题变量 */
+  --van-primary-color: #1f4e8c;
+  --van-success-color: #18a058;
+  --van-danger-color: #e5484d;
+  --van-warning-color: #f59e0b;
+  --van-text-color: #1c2434;
+  --van-text-color-2: #7c8698;
+  --van-text-color-3: #a7b0c0;
+  /* Vant 3 的变量名带 -color 后缀，与 Vant 4 不同 */
+  --van-background-color: #f4f6fb;
+  --van-background-color-light: #ffffff;
+  --van-border-color: #e9edf3;
+  --van-active-color: #f1f4f9;
+  --van-nav-bar-background-color: #14213d;
+  --van-nav-bar-title-text-color: #ffffff;
+  --van-nav-bar-icon-color: #ffffff;
+  --van-nav-bar-text-color: #ffffff;
+  --van-tabbar-item-active-color: #14213d;
+  --van-tabbar-item-text-color: #98a2b3;
+  --van-tabbar-height: 54px;
+  --van-tabbar-background-color: #ffffff;
+  --van-tabs-bottom-bar-color: #14213d;
+  --van-button-primary-background: #1f4e8c;
+  --van-button-primary-border-color: #1f4e8c;
+  --van-cell-group-inset-border-radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+  /* 保留系统点按高亮：移动端没有 hover，点按瞬间要有反馈 */
+  -webkit-tap-highlight-color: rgba(31, 78, 140, 0.12);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior-y: none;
+}
+
+/*
+ * 可点击内容统一按压态：移动端没有 hover，靠 :active 让用户知道点中了什么。
+ * 用法：给自定义的可点击 div / 卡片 / 列表行加 .tappable；
+ *      纯文字或纯图标链接加 .tappable--flat（只淡化，不出现色块）。
+ * 注意：border-radius 在此处先给默认值，后面的 .card 会以同等特异性覆盖为 14px。
+ */
+.tappable {
+  cursor: pointer;
+  border-radius: 10px;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background-color 0.14s ease, opacity 0.14s ease;
+}
+
+.tappable:active {
+  background-color: var(--van-active-color, #eef2f8);
+}
+
+.tappable--flat {
+  border-radius: 0;
+}
+
+.tappable--flat:active {
+  background-color: transparent;
+  opacity: 0.55;
+}
+
+/* 导航栏、底部标签栏的图标/文字也补上按压反馈 */
+.van-nav-bar .van-icon:active,
+.van-nav-bar__text:active {
+  opacity: 0.5;
+}
+
+.van-tabbar-item:active .van-tabbar-item__icon,
+.van-tabbar-item:active .van-tabbar-item__text {
+  opacity: 0.55;
+}
+
+/* 页面基础骨架：固定导航栏 + 可滚动内容 */
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-page);
+}
+
+.page-body {
+  flex: 1;
+  padding: 12px;
+}
+
+.page-body--tabbar {
+  padding-bottom: calc(12px + var(--van-tabbar-height) + env(safe-area-inset-bottom));
+}
+
+.page-body--plain {
+  padding: 0;
+}
+
+/* 通用卡片 */
+.card {
+  background: #fff;
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 2px 10px rgba(20, 33, 61, 0.05);
+}
+
+.card + .card {
+  margin-top: 12px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 18px 2px 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.section-title .more {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-sub);
+}
+
+.muted {
+  color: var(--text-sub);
+  font-size: 12px;
+}
+
+.strong {
+  font-weight: 700;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.text-danger {
+  color: var(--van-danger-color);
+}
+
+.text-primary {
+  color: var(--van-primary-color);
+}
+
+.text-success {
+  color: var(--van-success-color);
+}
+
+.text-warning {
+  color: var(--van-warning-color);
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gap-8 {
+  gap: 8px;
+}
+
+.gap-12 {
+  gap: 12px;
+}
+
+/* 数字指标 */
+.metric-value {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-label {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+/* 顶部渐变头图 */
+.hero {
+  padding: calc(18px + env(safe-area-inset-top)) 16px 18px;
+  color: #fff;
+  background:
+    radial-gradient(420px 180px at 90% -20%, rgba(252, 163, 17, 0.28), transparent 70%),
+    linear-gradient(150deg, #14213d 0%, #1d3560 62%, #14213d 100%);
+}
+
+.hero-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.hero-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+/* 左侧强调条 */
+.accent-bar {
+  position: relative;
+  padding-left: 10px;
+}
+
+.accent-bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  bottom: 3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--brand-accent);
+}
+
+/* 列表行 */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.row + .row {
+  margin-top: 10px;
+}
+
+.row-label {
+  color: var(--text-sub);
+  font-size: 13px;
+  flex: none;
+}
+
+.row-value {
+  text-align: right;
+  font-size: 13px;
+  color: var(--text-main);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.divider {
+  height: 1px;
+  background: var(--line);
+  margin: 12px 0;
+}
+
+/* 安全区 */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Vant 细节微调 */
+.van-nav-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding-top: env(safe-area-inset-top);
+}
+
+.van-nav-bar::after {
+  display: none;
+}
+
+.van-cell-group--inset {
+  margin: 0;
+}
+
+.van-tabbar {
+  box-shadow: 0 -4px 16px rgba(20, 33, 61, 0.06);
+}
+
+.van-tabbar::after {
+  display: none;
+}
+
+.van-button--large {
+  height: 46px;
+  font-size: 15px;
+}
+
+.van-tag {
+  border-radius: 6px;
+}
+
+.van-toast {
+  z-index: 3000;
+}
+
+.empty {
+  padding: 48px 0;
+}

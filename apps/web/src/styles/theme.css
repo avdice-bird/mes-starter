@@ -1,0 +1,61 @@
+/**
+ * 全局主题：统一视觉基线。改动只走 CSS 变量与浅层覆盖，不动组件库源码。
+ * 主色沿用品牌蓝 #14213D + 强调橙 #FCA311（侧边栏既有配色），全站统一。
+ */
+
+:root {
+  --brand-deep: #14213d;
+  --brand-accent: #fca311;
+  --page-bg: #f4f6fa;
+  --card-radius: 10px;
+}
+
+/* 页面底色与字体基线 */
+body {
+  font-family: 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--page-bg);
+  color: #303133;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 细滚动条（全局，含侧边栏/弹窗内滚动区） */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #c8cedb; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #aab3c5; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 卡片统一圆角与轻阴影 */
+.el-card {
+  border-radius: var(--card-radius);
+  border: 1px solid #eef1f6;
+  box-shadow: 0 1px 3px rgba(20, 33, 61, 0.06);
+}
+.el-card__header {
+  font-weight: 600;
+  border-bottom: 1px solid #eef1f6;
+}
+
+/* 表格：表头底色与字重统一（全局列表观感） */
+.el-table th.el-table__cell {
+  background: #f7f9fc;
+  color: #4a5568;
+  font-weight: 600;
+}
+.el-table .el-table__row { transition: background-color 0.15s; }
+
+/* 分页统一右对齐、留白 */
+.el-pagination { justify-content: flex-end; }
+
+/* 弹窗圆角与标题字重 */
+.el-dialog { border-radius: var(--card-radius); }
+.el-dialog__title { font-weight: 600; }
+
+/* 主按钮统一主题色（默认蓝换成品牌深蓝） */
+.el-button--primary {
+  --el-button-bg-color: #1d3a6d;
+  --el-button-border-color: #1d3a6d;
+  --el-button-hover-bg-color: #2a4f8f;
+  --el-button-hover-border-color: #2a4f8f;
+  --el-button-active-bg-color: #16305c;
+  --el-button-active-border-color: #16305c;
+}
